@@ -1,104 +1,104 @@
-//
-//  WeatherView.swift
-//  WeatherTracker
-//
-//  Created by Oscar Artemio Brito Ortiz on 06/06/26.
-//
-
 import SwiftUI
+import SwiftData
 
 struct WeatherView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \SavedLocation.createdAt) private var locations: [SavedLocation]
     @StateObject private var viewModel = WeatherViewModel()
+    @State private var showingAddSheet = false
+
+    private var isNight: Bool {
+        let h = Calendar.current.component(.hour, from: Date())
+        return h < 6 || h >= 20
+    }
+
+    private var bgColor: Color {
+        isNight ? Color(red: 0.10, green: 0.11, blue: 0.18) : Color(red: 0.94, green: 0.94, blue: 0.96)
+    }
+
+    private var fgColor: Color {
+        isNight ? .white : Color(red: 0.18, green: 0.18, blue: 0.28)
+    }
+
+    private let maxLocations = 4
 
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground)
-                .ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                bgColor.ignoresSafeArea()
 
-            VStack(spacing: 24) {
-
-                Text("Weather")
-                    .font(.largeTitle)
-                    .bold()
-
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    TextField("Search city...", text: $viewModel.searchText)
-                        .onSubmit {
-                            Task { await viewModel.searchCity() }
+                if locations.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        ForEach(locations) { location in
+                            NavigationLink {
+                                LocationDetailView(location: location, viewModel: viewModel)
+                            } label: {
+                                LocationRowView(location: location, viewModel: viewModel)
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
                         }
-                }
-                .padding()
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                .padding(.horizontal)
-
-  
-                if !viewModel.errorMessage.isEmpty {
-                    Text(viewModel.errorMessage)
-                        .foregroundColor(.red)
-                        .font(.subheadline)
-                }
-
-
-                if viewModel.isLoading {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                }
-
-                if !viewModel.cityName.isEmpty && !viewModel.isLoading {
-                    VStack(spacing: 16) {
-
-                        Text(viewModel.cityName)
-                            .font(.title)
-                            .bold()
-
-                        Text(viewModel.temperature)
-                            .font(.system(size: 52, weight: .thin))
-
-                        Text(viewModel.timeText)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Divider()
-
-                        HStack(spacing: 32) {
-                            WeatherStatView(icon: "wind", label: "Wind", value: viewModel.windText)
-                        }
+                        .onDelete(perform: deleteLocations)
                     }
-                    .padding(24)
-                    .frame(maxWidth: .infinity)
-                    .background(Color(.systemBackground))
-                    .cornerRadius(20)
-                    .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
-                    .padding(.horizontal)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .refreshable { viewModel.fetchAll(locations: locations) }
                 }
-
-                Spacer()
             }
-            .padding(.top, 32)
+            .navigationTitle("Weather Watchlist")
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(isNight ? .dark : .light, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingAddSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .foregroundColor(fgColor)
+                    }
+                    .disabled(locations.count >= maxLocations)
+                }
+                if !locations.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        EditButton()
+                            .foregroundColor(fgColor)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingAddSheet) {
+                AddLocationView(viewModel: viewModel) { location in
+                    modelContext.insert(location)
+                    viewModel.fetchWeather(for: location)
+                }
+            }
+            .onAppear {
+                viewModel.fetchAll(locations: locations)
+            }
         }
     }
-}
 
-struct WeatherStatView: View {
-    let icon: String
-    let label: String
-    let value: String
+    private func deleteLocations(at offsets: IndexSet) {
+        for index in offsets {
+            let location = locations[index]
+            viewModel.cancelFetch(for: location.id)
+            modelContext.delete(location)
+        }
+    }
 
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(.blue)
-            Text(value)
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "cloud.sun")
+                .font(.system(size: 64))
+                .foregroundColor(fgColor.opacity(0.4))
+            Text("No Locations")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(fgColor)
+            Text("Tap + to add up to \(maxLocations) locations")
                 .font(.subheadline)
-                .bold()
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(fgColor.opacity(0.45))
         }
     }
 }
